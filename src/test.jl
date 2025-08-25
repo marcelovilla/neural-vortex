@@ -1,4 +1,6 @@
-#### TESTING SIZES OF OUTPUT VECTORS (Trunc_x.jld2 files in run000x folders)
+#### TESTING SIZES OF OUTPUT VECTORS (Trunc_x.jld2 files in run000x folders) ####
+# even tho output_dt = Hour(1), internal adjustments lead to different sample SIZES
+# accounted for in FNO_helper.jl
 
 using JLD2
 
