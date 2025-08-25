@@ -1,7 +1,8 @@
 # FNO - Helper script"
   
-# From src/utils.jl and src/helper.ipynb, the output_vector from SpeedyWeather 
-# needs to be converted to gridded data, s.t. the 2D FNO can work with it"
+# Using src/utils.jl and src/helper.ipynb to generate output_vector from SpeedyWeather 
+# Vector needs to be converted from octrahedral gaussian grid to 
+# gridded data, s.t. the 2D FNO can work with it"
 
 using JLD2
 using SpeedyWeather.RingGrids
@@ -9,44 +10,7 @@ using SpeedyWeather.RingGrids
 include("../../src/utils.jl")
 include("../../src/helper.jl")
 
-# a) from octrahedral to rectangular grid (as a resolution, choosing 192 x 96 since 
-# that corresponds to our highest truncation level T = 63)
-# using RingGrids.jl library
-
- # function octa_to_rect_grid(field; nlat=96, nlon = 192) {
-
-    # Build target grid and target geometry
-  #  build_grid = RingGrids.FullGaussianGrid(nlat, nlon)
- #   target_geom = RingGrids.GridGeometry(build_grid)
-
-    # Set up interpolator
-   # interpolator = RingGrids.AnvilInterpolator(field.grid, nlat)
-
-    # Allocate output
-    # out = zeros(Float32, nlat, nlon)
-
-    # Build a target field living on the interpolator’s grid
-  #  target_grid = RingGrids.FullGaussianGrid(nlat)
- #   target_field = RingGrids.Field(Float32, target_grid)
-#
-    # Interpolate!
-#    RingGrids.interpolate!(target_field, field, interpolator)
-
- #   return reshape(Array(target_field.values, nlat, nlon))
-# end
-# }
-
-# function octa_to_rect_grid(field; nlat=48, nlon = 192)
-    # Build the target grid
-    #target_grid = RingGrids.FullGaussianGrid(nlat)
-
-    # Interpolate directly
-   # out_field = RingGrids.interpolate(target_grid, field)
-
-    # Reshape values to (nlat, nlon)
-   # arr = parent(out_field)
-   # return reshape(arr, 2*nlat, nlon)
-# end
+# a) From octrahedral gaussian to rectangular grid, choosing resolution 192 x 96  
 
 using SpeedyWeather.RingGrids
 
@@ -78,9 +42,9 @@ function octa_to_rect_grid(field; nlat=96, nlon = 192)
     return reshape(arr, nlat_actual, nlon_actual)
 end
 
-# b) from spectral to gridded data
+# b) Collecting gridded data only (output vector still contains spectral and gridded data)
 
-function gridded_data_fno(filename; nlat=96, nlon=192)
+function gridded_data_fno(filename; nlat=96, nlon=192, period=Day(20), output_dt=Hour(1))
     data = JLD2.load(filename)
     nt = length(data["output_vector"])
 
@@ -90,17 +54,34 @@ function gridded_data_fno(filename; nlat=96, nlon=192)
             u   = octa_to_rect_grid(diag.grid.u_grid;   nlat=nlat, nlon=nlon)
             v   = octa_to_rect_grid(diag.grid.v_grid;   nlat=nlat, nlon=nlon)
             vor = octa_to_rect_grid(diag.grid.vor_grid; nlat=nlat, nlon=nlon)
-            cat(u, v, vor; dims=3)   # Stack the channel variables u,v,vor
+            cat(u, v, vor; dims=3)   # Stack channel variables u,v,vor
         end
         for t in 1:nt
     ]
-    X = stack(snapshots)                  # (nlat, nlon, 3, time)
-    # X = permutedims(X, (3, 1, 2, 4))       # (channels=3, nlat, nlon, time)
-    println(size(X))
-    train_size = 384 # 80% of total sample size 481, for training (rest for validation)
-    x_train = X[:, :, :,1:(train_size)-1] # x
-    y_train = X[:, :, :,2:(train_size)] # f(x) = y = x + dx
-    x_valid = X[:, :, :,train_size:end-1]
-    y_valid = X[:, :, :,(train_size)+1:end]
-    return x_train, y_train, x_valid, y_valid
+    X = stack(snapshots) # (nlat, nlon, 3, time)
+
+
+    """
+    In src: Internal adjustments of time stepping dt (higher trunc -) smaller dt -) uneven sample size)
+    post fixing this by only reading values every 1 Hour (leads to even sample size)
+    """
+    ##### FIX: crop to exactly period / output_dt samples #####
+    n_expected = Int(round(period / output_dt)) + 1  # +1 if you want t=0 included
+    X = X[:, :, :, 1:min(n_expected, size(X,4))]
+
+    println("Final shape = ", size(X))
+    return X
+
+    function split_train_valid(X; train_ratio=0.8) # using 80% of data for training (481*0.8), 20% for validation
+        n_samples = size(X, 4)  # time dimension (last axis)
+        train_size = Int(floor(train_ratio * n_samples))
+    
+        x_train = X[:, :, :, 1:(train_size-1)] # x
+        y_train = X[:, :, :, 2:(train_size)] # f(x) = y = x + dx
+        x_valid = X[:, :, :, (train_size):end-1]
+        y_valid = X[:, :, :, (train_size+1):end]
+    
+        return x_train, y_train, x_valid, y_valid
+    end
+
 end
