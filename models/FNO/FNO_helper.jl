@@ -62,12 +62,13 @@ function gridded_data_fno(filename; nlat=96, nlon=192, period=Day(20), output_dt
 
 
     """
-    In src: Internal adjustments of time stepping dt (higher trunc -) smaller dt -) uneven sample size)
+    In src: Adjustments of time stepping dt (higher trunc -) smaller dt -) uneven sample size)
     post fixing this by only reading values every 1 Hour (leads to even sample size)
     """
+    # NOT SURE THIS IS NECESSARY
     ##### FIX: crop to exactly period / output_dt samples #####
-    n_expected = Int(round(period / output_dt)) + 1  # +1 if you want t=0 included
-    X = X[:, :, :, 1:min(n_expected, size(X,4))]
+    # n_expected = Int(round(period / output_dt)) + 1  # +1 if you want t=0 included
+    # X = X[:, :, :, 1:min(n_expected, size(X,4))]
 
     println("Final shape = ", size(X))
     return X
