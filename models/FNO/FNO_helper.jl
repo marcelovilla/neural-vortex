@@ -6,6 +6,8 @@
 
 using JLD2
 using SpeedyWeather.RingGrids
+using CairoMakie
+CM = CairoMakie
 
 include("../../src/utils.jl")
 include("../../src/helper.jl")
@@ -18,71 +20,56 @@ using SpeedyWeather.RingGrids
 Interpolate an OctahedralGaussianField to a FullGaussianGrid and return
 the values as a `(nlat, nlon)` array.
 """
-function octa_to_rect_grid(field; nlat=96, nlon = 192)
-    # Build target grid: FullGaussianGrid requires "half-lats"
+function octa_to_rect_grid(field; nlat=96, nlon=192)
     target_grid = FullGaussianGrid(nlat ÷ 2)
-
-    # Interpolate directly
-    out_field = interpolate(target_grid, field)
-
-    # Extract the array of values
-    arr = parent(out_field)
-
-    # Derive shape from the grid itself
-    latitudes  = get_latd(target_grid)   # vector of length nlat
-    longitudes = get_lond(target_grid)   # vector of length nlon
-
-    nlat_actual = length(latitudes)
-    nlon_actual = length(longitudes)
-
-    # println("Target grid shape: $(nlat_actual) × $(nlon_actual)")
-    # println("Interpolated array length: $(length(arr))")
-
-    # Reshape consistently with grid geometry
-    return reshape(arr, nlat_actual, nlon_actual)
+    out_field   = interpolate(target_grid, field)  # Field on FullGaussianGrid
+    arr = Array(out_field)  # already shaped (nlat, nlon)
+    return arr   # return both
 end
 
 # b) Collecting gridded data only (output vector still contains spectral and gridded data)
 
-function gridded_data_fno(filename; nlat=96, nlon=192, period=Day(20), output_dt=Hour(1))
+function gridded_data_fno(filename; nlat=96, nlon=192)
     data = JLD2.load(filename)
     nt = length(data["output_vector"])
+    diag1 = data["output_vector"][1][2]
+    println("Raw octahedral vorticity: ", extrema(diag1.grid.vor_grid[:,1]))
+    vor_arr = octa_to_rect_grid(diag1.grid.vor_grid; nlat=nlat, nlon=nlon)
+    println("After octa_to_rect_grid → FullGaussian: ", extrema(vor_arr))
 
     snapshots = [
         begin
             diag = data["output_vector"][t][2]  # DiagnosticVariables([2]) at time t
-            u   = octa_to_rect_grid(diag.grid.u_grid;   nlat=nlat, nlon=nlon)
-            v   = octa_to_rect_grid(diag.grid.v_grid;   nlat=nlat, nlon=nlon)
+            # u   = octa_to_rect_grid(diag.grid.u_grid;   nlat=nlat, nlon=nlon)
+            # v   = octa_to_rect_grid(diag.grid.v_grid;   nlat=nlat, nlon=nlon)
             vor = octa_to_rect_grid(diag.grid.vor_grid; nlat=nlat, nlon=nlon)
-            cat(u, v, vor; dims=3)   # Stack channel variables u,v,vor
+            # cat(u, v, vor; dims=3)   # Stack the channel variables u,v,vor
+            reshape(vor, nlat, nlon, 1) 
         end
         for t in 1:nt
     ]
-    X = stack(snapshots) # (nlat, nlon, 3, time)
+    X = cat(snapshots...; dims=4)                  # (nlat, nlon, 3, time)
+    println(size(X))
+    println("Max of concatenated X:", extrema(X[:,:,1,:]))
+    train_size = 384 # 80% of total sample size 481, for training (rest for testing)
+    x_train = X[:, :, :,1:(train_size)-1] # x
+    y_train = X[:, :, :,2:(train_size)] # f(x) = y = x + dx
+    x_test = X[:, :, :,train_size:end-1]
+    y_test = X[:, :, :,(train_size)+1:end]
+    println("x_train extrema just before save: ", extrema(x_train))
+    println("x_test extrema just before save: ", extrema(x_test))
+    return x_train, y_train, x_test, y_test
+end
 
+function rmse(pred, x_test)
+    return sqrt(mean((pred .- x_test).^2))
+end 
 
-    """
-    In src: Adjustments of time stepping dt (higher trunc -) smaller dt -) uneven sample size)
-    post fixing this by only reading values every 1 Hour (leads to even sample size)
-    """
-    # NOT SURE THIS IS NECESSARY
-    ##### FIX: crop to exactly period / output_dt samples #####
-    # n_expected = Int(round(period / output_dt)) + 1  # +1 if you want t=0 included
-    # X = X[:, :, :, 1:min(n_expected, size(X,4))]
-
-    println("Final shape = ", size(X))
-    return X
-
-    function split_train_valid(X; train_ratio=0.8) # using 80% of data for training (481*0.8), 20% for validation
-        n_samples = size(X, 4)  # time dimension (last axis)
-        train_size = Int(floor(train_ratio * n_samples))
-    
-        x_train = X[:, :, :, 1:(train_size-1)] # x
-        y_train = X[:, :, :, 2:(train_size)] # f(x) = y = x + dx
-        x_valid = X[:, :, :, (train_size):end-1]
-        y_valid = X[:, :, :, (train_size+1):end]
-    
-        return x_train, y_train, x_valid, y_valid
-    end
-
+function compute_error(pred, x_test)
+    n = size(x_test, 4)
+    err = zeros(n)
+    for i in 1:n
+        err[i] = rmse(pred[:,:,1,i], x_test[:,:,1,i])
+    end 
+    return err
 end
