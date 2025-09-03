@@ -1,3 +1,4 @@
+using Dates
 using SpeedyWeather
 
 function generate_vorticity(trunc, period, output_dt; filename="output.jld2")
@@ -13,4 +14,15 @@ function generate_vorticity(trunc, period, output_dt; filename="output.jld2")
     simulation = initialize!(model)
 
     run!(simulation, period=period, output=true)
+end
+
+function generate_vort_all_trunc()
+
+    truncations = [5, 20]
+
+    for trunc in truncations
+        filename = "trunc_$trunc.jld2"
+        println("Running truncation $trunc → saving to $filename")
+        generate_vorticity(trunc, Day(20), Hour(1); filename=filename)
+    end
 end
