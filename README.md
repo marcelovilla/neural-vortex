@@ -21,6 +21,7 @@ julia scripts/esn_predictions.jl
 ```
 ### For the FNO:
 if you already are on a GPU, you can run the ``` FNO/FNO2D.ipynb ```, which includes data generation
+
 If you use an external GPU through a different UI (which does not take ipynbs), use ``` FNO/FNO2D_gpu.jl ```
 Change all filepaths accordingly!
 
